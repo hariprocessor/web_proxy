@@ -1,0 +1,285 @@
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <time.h>
+#include <arpa/inet.h>
+#include <netdb.h>      // define structures like hostent
+#include <pthread.h>
+
+#define BUFSIZE 524288
+#define DATESIZE 256
+#define HOSTSIZE 256
+#define CACHESIZE 10
+#define OBJECTSIZE 524288
+#define THREADSIZE 5
+
+struct Cache{
+  char buf[OBJECTSIZE];
+};
+
+typedef struct Arg{
+  int newsock;
+  FILE *fp;
+  struct sockaddr_in cli_addr;
+}thread_arg;
+
+void error(char *msg);
+void current_time(char *date);
+void *thread_main(void *thread_arg);
+
+pthread_mutex_t mutx;
+
+int main(int argc, char *argv[])
+{
+
+  
+  int sockfd, newsockfd;
+  int * new_sock;
+  thread_arg * args;
+  struct Cache c[CACHESIZE];
+
+  int portno;
+  socklen_t clilen;
+     
+  char buffer[BUFSIZE];
+  char buffer2[BUFSIZE];
+
+  struct sockaddr_in serv_addr, cli_addr;
+  struct sockaddr_in * new_addr;
+  pthread_t t;
+  int tn = 0;
+
+
+  int n;
+
+  char *ptr;
+  FILE *fp;
+
+  char savebuff[BUFSIZE];
+
+  if(fp = fopen("proxy.log", "a"));
+  if (argc < 2) {
+    fprintf(stderr,"ERROR, no port provided\n");
+    exit(1);
+  }
+     
+  if( pthread_mutex_init( &mutx , NULL ) )
+    error( "mutex init error" );
+
+  sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sockfd < 0) 
+    error("ERROR opening socket");
+     
+  bzero((char *) &serv_addr, sizeof(serv_addr));
+  portno = atoi(argv[1]);
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_addr.s_addr = INADDR_ANY;
+  serv_addr.sin_port = htons(portno);
+     
+  if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
+    error("ERROR on binding");
+
+  //  pthread_t *t;
+  while(1){
+    listen(sockfd,5);
+     
+    clilen = sizeof(cli_addr);
+    while(newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) {
+      if (newsockfd < 0) {
+	fprintf(stderr, "ACCEPT ERROR!\n");
+	continue;
+      }
+
+    /* new_sock = (int *)malloc(1); */
+    /* new_addr = malloc(sizeof(struct sockaddr_in)); */
+
+    args = (thread_arg *)malloc(sizeof(thread_arg));
+    args->newsock = newsockfd;
+    args->fp = fp;
+    args->cli_addr = cli_addr;
+    //printf("open sock:%d\n", newsockfd);
+    if(pthread_create(&t, NULL, thread_main, (void *)args) < 0)
+      error("Could not create thread");
+    pthread_detach(t);
+    //printf("PARENT\n");
+    
+      /*void *thread_main(int *_newsockfd, FILE *fp, struct sockaddr_in cli_addr);*/
+
+    /*
+      sockfd2 = socket(AF_INET, SOCK_STREAM, 0); //create a new socket
+      if(sockfd2 < 0)
+      error("ERROR opening socket");
+    */
+    
+    //    //printf("hostname : %s\n", hostname);
+    }
+  }
+  close(sockfd);
+  fclose(fp);
+
+  return 0; 
+}
+
+
+void current_time(char *date){
+  char wday[4];
+  int day;
+  char month[4];
+  int year;
+  int hour;
+  int min;
+  int sec;
+  time_t timer;
+  char tt[9];
+  struct tm *t;
+
+  timer = time(NULL);
+  t = localtime(&timer);
+
+  year = t->tm_year + 1900;
+  switch(t->tm_mon+1){
+  case 1: sprintf(month, "%s", "Jan"); break;
+  case 2: sprintf(month, "%s", "Feb"); break;
+  case 3: sprintf(month, "%s", "Mar"); break;
+  case 4: sprintf(month, "%s", "Apr"); break;
+  case 5: sprintf(month, "%s", "May"); break;
+  case 6: sprintf(month, "%s", "Jun"); break;
+  case 7: sprintf(month, "%s", "Jul"); break;
+  case 8: sprintf(month, "%s", "Aug"); break;
+  case 9: sprintf(month, "%s", "Sep"); break;
+  case 10: sprintf(month, "%s", "Oct"); break;
+  case 11: sprintf(month, "%s", "Nov"); break;
+  case 12: sprintf(month, "%s", "Dec"); break;
+  }
+
+  switch(t->tm_wday){
+  case 0: sprintf(wday, "%s", "Sun"); break;
+  case 1: sprintf(wday, "%s", "Mon"); break;
+  case 2: sprintf(wday, "%s", "Tue"); break;
+  case 3: sprintf(wday, "%s", "Wed"); break;
+  case 4: sprintf(wday, "%s", "Thu"); break;
+  case 5: sprintf(wday, "%s", "Fri"); break;
+  case 6: sprintf(wday, "%s", "Sat"); break;    
+  }
+
+  day = t->tm_mday;
+  hour = t->tm_hour;
+  min = t->tm_min;
+  sec = t->tm_sec;
+  sprintf(tt, "%d:%d:%d", hour, min, sec);
+  sprintf(date, "%s %d %s %d %s ", wday, day, month, year, tt);
+
+  /*Sun 26 Oct 2014 02:51:02 EST: 166.104.231.100 http://cnlab.hanyang.ac.kr/ 34314*/
+}
+
+
+void error(char *msg)
+{
+  perror(msg);
+  exit(1);
+}
+
+
+void *thread_main(void *args){
+  int n;
+  int size;
+  char date[DATESIZE];
+  char buffer[BUFSIZE];
+  char savebuff[BUFSIZE];
+  struct sockaddr_in origin_addr;
+  struct hostent *origin;
+  char hostname[HOSTSIZE];
+  int origin_portno;
+  int origin_n;
+  char *ptr;
+  int sockfd2;
+  int newsockfd = ((thread_arg *)args)->newsock;
+  FILE * fp = ((thread_arg *)args)->fp;
+  struct sockaddr_in cli_addr = ((thread_arg *)args)->cli_addr;
+  
+  //printf("THREAD CREATE!\n");
+  bzero(buffer,BUFSIZE);
+  n = recv(newsockfd,buffer,BUFSIZE-1,0);
+  if (n < 0) error("ERROR reading from socket");
+
+  if (!n) {
+    close(sockfd2);
+    close(newsockfd);
+    free(args);
+    pthread_exit(0);
+  }
+  printf(">>>>\n%s<<<<%d\n", buffer, n);
+  strcpy(savebuff, buffer);
+  ptr = strtok(savebuff, "\r\n");
+  ptr = strtok(NULL, "\r\n");
+  //sprintf(hostname, "%s", ptr);
+  ptr = strtok(ptr, " ");
+  ptr = strtok(NULL, " ");
+  //printf("1\n");
+  //  sprintf(hostname, "%s", ptr);
+  //  sprintf(savebuff, "%s", hostname);
+  //  printf("bf-%s\n", ptr);
+  ptr = strtok(ptr, ":");
+  //  printf("%s\n", ptr);
+  sprintf(hostname, "%s", ptr);
+  ptr = strtok(NULL, ":");
+  if(ptr == NULL)
+    origin_portno = 80;
+  else
+    origin_portno = atoi(ptr);
+
+  //printf("2\n");
+  sockfd2 = socket(AF_INET, SOCK_STREAM, 0); //create a new socket
+  if (sockfd2 < 0) 
+    error("ERROR opening socket");
+
+
+  origin = gethostbyname(hostname);
+  if (origin == NULL) {
+    fprintf(stderr,"ERROR, no such host\n");
+    exit(0);
+  }
+  //printf("3\n");    
+  bzero((char *) &origin_addr, sizeof(origin_addr));
+  origin_addr.sin_family = AF_INET; //initialize server's address
+  bcopy((char *)origin->h_addr, (char *)&origin_addr.sin_addr.s_addr, origin->h_length);
+  origin_addr.sin_port = htons(origin_portno);
+
+  //printf("4\n");
+  if (connect(sockfd2,(struct sockaddr *)&origin_addr,sizeof(origin_addr)) < 0)
+    error("ERROR connecting");
+    
+  origin_n = send(sockfd2, buffer, strlen(buffer), 0);
+  if(origin_n < 0)
+    error("ERROR writing to socket");
+  //printf("5\n");    
+  bzero(buffer, BUFSIZE);
+  size = 0;
+  //printf("sockfd2:%d\n", sockfd2);
+  while((origin_n = recv(sockfd2, buffer, BUFSIZE, 0)) > 0) {
+    //    //printf("origin_n : %d\n", origin_n);
+    send(newsockfd,buffer,origin_n,0);
+    size+=origin_n;
+  }
+
+  //  //printf("7\n");
+  //  //printf("size : %d\n", size);
+  //  //printf("THREAD END!\n");
+  /* current_time(date); */
+  /* fprintf(fp, "%sEST: %s %s %d\n", date, inet_ntoa(cli_addr.sin_addr), hostname, size); */
+ 
+  close(sockfd2);
+  //printf("8 sock:%d\n", newsockfd);
+  //  //printf("8\n");
+  close(newsockfd);
+  //printf("9 sock:%d\n", newsockfd);
+  free(args);
+  //printf("10\n");
+
+  //printf("THREAD END!\n");
+  pthread_exit(0);
+}
