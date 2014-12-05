@@ -4,7 +4,14 @@
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <strings.h>
-
+#include <signal.h>
+int sockfd, newsockfd;
+int sockfd2;
+void sigint_handler(){
+  close(sockfd);
+  close(newsockfd);
+  exit(0);
+}
 void error(char *msg)
 {
   perror(msg);
@@ -13,7 +20,7 @@ void error(char *msg)
 
 int main(int argc, char *argv[])
 {
-  int sockfd, newsockfd;
+
   int portno;
   socklen_t clilen;
      
@@ -39,24 +46,30 @@ int main(int argc, char *argv[])
      
   if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
     error("ERROR on binding");
+
+  printf("sockfd : %d, newsockfd : %d\n", sockfd, newsockfd);
+  signal(SIGINT, sigint_handler);
+  while(1){
+    listen(sockfd,5);
      
-  listen(sockfd,5);
-     
-  clilen = sizeof(cli_addr);
-  newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-  if (newsockfd < 0) 
-    error("ERROR on accept");
-     
-  bzero(buffer,256);
-  n = read(newsockfd,buffer,255);
-  if (n < 0) error("ERROR reading from socket");
-  printf("Here is the message: %s\n",buffer);
-     
-  n = write(newsockfd,"I got your message",18);
-  if (n < 0) error("ERROR writing to socket");
-     
+    clilen = sizeof(cli_addr);
+    newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+    if (newsockfd < 0) 
+      error("ERROR on accept");
+
+    bzero(buffer,256);
+    n = read(newsockfd,buffer,255);
+    if (n < 0) error("ERROR reading from socket");
+    printf("\n\n****************************\nHere is the message: %s\n",buffer);
+    
+    n = write(newsockfd,"HTTP/1.1 200 OK\r\nContent-Type:text/html\r\nContent-length:13\r\n\r\n<h1>data</h1>",76);
+    if (n < 0) error("ERROR writing to socket");
+    printf("sockfd : %d, newsockfd : %d\n", sockfd, newsockfd);
+    close(newsockfd);
+  }
   close(sockfd);
-  close(newsockfd);
-     
+
+
   return 0; 
 }
+
